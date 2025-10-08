@@ -448,6 +448,32 @@
             border-radius: 10px;
         }
 
+        /* YouTube Player Container */
+        #youtube-player {
+            position: fixed;
+            top: -1000px;
+            left: -1000px;
+            width: 10px;
+            height: 10px;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Loading Spinner */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
         /* Responsive Design */
         @media (max-width: 992px) {
             .main-content {
@@ -602,14 +628,14 @@
                 <div class="control-buttons">
                     <button id="shuffle-btn"><i class="fas fa-random"></i></button>
                     <button id="prev-btn"><i class="fas fa-step-backward"></i></button>
-                    <button id="play-pause-btn" class="play-pause"><i class="fas fa-play"></i></button>
+                    <button id="play-pause-btn" class="play-pause"><i class="fas fa-play" id="play-pause-icon"></i></button>
                     <button id="next-btn"><i class="fas fa-step-forward"></i></button>
                     <button id="repeat-btn"><i class="fas fa-redo"></i></button>
                 </div>
                 <div class="progress-area">
                     <span class="time current-time">0:00</span>
-                    <div class="progress-bar">
-                        <div class="progress"></div>
+                    <div class="progress-bar" id="progress-bar">
+                        <div class="progress" id="progress"></div>
                     </div>
                     <span class="time total-time">3:45</span>
                 </div>
@@ -620,14 +646,18 @@
                 <button id="queue-btn"><i class="fas fa-list"></i></button>
                 <div class="volume-control">
                     <button id="volume-btn"><i class="fas fa-volume-up"></i></button>
-                    <div class="volume-bar">
-                        <div class="volume-level"></div>
+                    <div class="volume-bar" id="volume-bar">
+                        <div class="volume-level" id="volume-level"></div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- Hidden YouTube Player -->
+    <div id="youtube-player"></div>
+
+    <!-- YouTube IFrame API -->
     <script>
         // Sample song data with YouTube video IDs
         const songs = [
@@ -705,27 +735,86 @@
         const currentSongTitle = document.getElementById('current-song-title');
         const currentSongArtist = document.getElementById('current-song-artist');
         const playPauseBtn = document.getElementById('play-pause-btn');
+        const playPauseIcon = document.getElementById('play-pause-icon');
         const prevBtn = document.getElementById('prev-btn');
         const nextBtn = document.getElementById('next-btn');
-        const progressBar = document.querySelector('.progress');
+        const progressBar = document.getElementById('progress-bar');
+        const progress = document.getElementById('progress');
         const currentTimeEl = document.querySelector('.current-time');
         const totalTimeEl = document.querySelector('.total-time');
-        const volumeLevel = document.querySelector('.volume-level');
+        const volumeLevel = document.getElementById('volume-level');
+        const volumeBar = document.getElementById('volume-bar');
         const likeBtn = document.getElementById('like-btn');
 
         // App State
         let currentSongIndex = 0;
         let isPlaying = false;
-        let currentTime = 0;
-        let totalTime = 0;
+        let player;
         let progressInterval;
         let likedSongs = new Set();
+        let volume = 70;
+
+        // Initialize YouTube Player
+        function initYouTubePlayer() {
+            // Load YouTube IFrame API
+            const tag = document.createElement('script');
+            tag.src = "https://www.youtube.com/iframe_api";
+            const firstScriptTag = document.getElementsByTagName('script')[0];
+            firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+        }
+
+        // Called when YouTube API is ready
+        function onYouTubeIframeAPIReady() {
+            player = new YT.Player('youtube-player', {
+                height: '0',
+                width: '0',
+                playerVars: {
+                    'playsinline': 1,
+                    'controls': 0,
+                    'disablekb': 1,
+                    'enablejsapi': 1,
+                    'iv_load_policy': 3,
+                    'modestbranding': 1,
+                    'origin': window.location.origin
+                },
+                events: {
+                    'onReady': onPlayerReady,
+                    'onStateChange': onPlayerStateChange
+                }
+            });
+        }
+
+        function onPlayerReady(event) {
+            console.log('YouTube Player Ready');
+            // Load first song
+            loadSong(currentSongIndex);
+        }
+
+        function onPlayerStateChange(event) {
+            const playerState = event.data;
+            
+            switch(playerState) {
+                case YT.PlayerState.PLAYING:
+                    isPlaying = true;
+                    playPauseIcon.className = 'fas fa-pause';
+                    startProgressTracking();
+                    break;
+                case YT.PlayerState.PAUSED:
+                    isPlaying = false;
+                    playPauseIcon.className = 'fas fa-play';
+                    stopProgressTracking();
+                    break;
+                case YT.PlayerState.ENDED:
+                    playNextSong();
+                    break;
+            }
+        }
 
         // Initialize the app
         function init() {
             renderSongs();
-            loadSong(currentSongIndex);
             setupEventListeners();
+            initYouTubePlayer();
         }
 
         // Render songs to the grids
@@ -782,15 +871,26 @@
         // Load a song into the player
         function loadSong(index) {
             const song = songs[index];
+            
+            if (!player || !player.loadVideoById) {
+                console.log('Player not ready yet');
+                return;
+            }
+
+            // Show loading state
+            playPauseIcon.className = 'loading';
+            
+            player.loadVideoById(song.youtubeId);
+            player.setVolume(volume);
+            
             currentSongImg.src = song.thumbnail;
             currentSongTitle.textContent = song.title;
             currentSongArtist.textContent = song.artist;
             totalTimeEl.textContent = song.duration;
             
             // Reset progress
-            progressBar.style.width = '0%';
+            progress.style.width = '0%';
             currentTimeEl.textContent = '0:00';
-            currentTime = 0;
             
             // Update active song card
             document.querySelectorAll('.song-card').forEach(card => {
@@ -806,39 +906,51 @@
 
         // Play the current song
         function playSong() {
-            isPlaying = true;
-            playPauseBtn.innerHTML = '<i class="fas fa-pause"></i>';
-            
-            // Simulate progress for demo purposes
-            clearInterval(progressInterval);
-            progressInterval = setInterval(updateProgress, 1000);
+            if (player && player.playVideo) {
+                player.playVideo();
+            }
         }
 
         // Pause the current song
         function pauseSong() {
-            isPlaying = false;
-            playPauseBtn.innerHTML = '<i class="fas fa-play"></i>';
-            clearInterval(progressInterval);
+            if (player && player.pauseVideo) {
+                player.pauseVideo();
+            }
+        }
+
+        // Start tracking progress
+        function startProgressTracking() {
+            stopProgressTracking();
+            progressInterval = setInterval(updateProgress, 1000);
+        }
+
+        // Stop tracking progress
+        function stopProgressTracking() {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
         }
 
         // Update progress bar and time
         function updateProgress() {
-            const song = songs[currentSongIndex];
-            const durationParts = song.duration.split(':');
-            totalTime = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
-            
-            if (currentTime < totalTime) {
-                currentTime++;
-                const progressPercent = (currentTime / totalTime) * 100;
-                progressBar.style.width = `${progressPercent}%`;
+            if (player && player.getCurrentTime && player.getDuration) {
+                const currentTime = player.getCurrentTime();
+                const duration = player.getDuration();
                 
-                // Format current time
-                const minutes = Math.floor(currentTime / 60);
-                const seconds = currentTime % 60;
-                currentTimeEl.textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-            } else {
-                // Song ended, play next
-                playNextSong();
+                if (duration > 0) {
+                    const progressPercent = (currentTime / duration) * 100;
+                    progress.style.width = `${progressPercent}%`;
+                    
+                    // Format current time
+                    const minutes = Math.floor(currentTime / 60);
+                    const seconds = Math.floor(currentTime % 60);
+                    currentTimeEl.textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+                    
+                    // Format total time
+                    const totalMinutes = Math.floor(duration / 60);
+                    const totalSeconds = Math.floor(duration % 60);
+                    totalTimeEl.textContent = `${totalMinutes}:${totalSeconds < 10 ? '0' : ''}${totalSeconds}`;
+                }
             }
         }
 
@@ -879,6 +991,15 @@
             updateLikeButton();
         }
 
+        // Set volume
+        function setVolume(percent) {
+            volume = percent;
+            if (player && player.setVolume) {
+                player.setVolume(volume);
+            }
+            volumeLevel.style.width = `${volume}%`;
+        }
+
         // Setup event listeners
         function setupEventListeners() {
             // Play/Pause button
@@ -900,38 +1021,39 @@
             likeBtn.addEventListener('click', toggleLike);
 
             // Progress bar click
-            document.querySelector('.progress-bar').addEventListener('click', (e) => {
-                const progressBar = e.currentTarget;
-                const clickX = e.offsetX;
-                const width = progressBar.clientWidth;
-                const percent = (clickX / width) * 100;
-                
-                progressBar.querySelector('.progress').style.width = `${percent}%`;
-                
-                // Update current time
-                const song = songs[currentSongIndex];
-                const durationParts = song.duration.split(':');
-                totalTime = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
-                currentTime = Math.floor((percent / 100) * totalTime);
-                
-                const minutes = Math.floor(currentTime / 60);
-                const seconds = currentTime % 60;
-                currentTimeEl.textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+            progressBar.addEventListener('click', (e) => {
+                if (player && player.getDuration) {
+                    const rect = progressBar.getBoundingClientRect();
+                    const percent = (e.clientX - rect.left) / rect.width;
+                    const duration = player.getDuration();
+                    const newTime = duration * percent;
+                    
+                    player.seekTo(newTime, true);
+                }
             });
 
             // Volume bar click
-            document.querySelector('.volume-bar').addEventListener('click', (e) => {
-                const volumeBar = e.currentTarget;
-                const clickX = e.offsetX;
-                const width = volumeBar.clientWidth;
-                const percent = (clickX / width) * 100;
-                
-                volumeLevel.style.width = `${percent}%`;
+            volumeBar.addEventListener('click', (e) => {
+                const rect = volumeBar.getBoundingClientRect();
+                const percent = (e.clientX - rect.left) / rect.width;
+                setVolume(Math.min(100, Math.max(0, Math.round(percent * 100))));
+            });
+
+            // Volume button
+            document.getElementById('volume-btn').addEventListener('click', () => {
+                if (volume > 0) {
+                    setVolume(0);
+                } else {
+                    setVolume(70);
+                }
             });
         }
 
         // Initialize the app when DOM is loaded
         document.addEventListener('DOMContentLoaded', init);
+
+        // Make onYouTubeIframeAPIReady globally available
+        window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
     </script>
 </body>
 </html>
